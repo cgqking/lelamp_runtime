@@ -1,219 +1,219 @@
-# LeLamp Runtime
+# LeLamp 运行时
 
 ![](./assets/images/Banner.png)
 
-This repository holds the code for controlling LeLamp. The runtime provides a comprehensive control system for the robotic lamp, including motor control, recording/replay functionality, voice interaction, and testing capabilities.
+此仓库包含用于控制 LeLamp 的运行时代码。运行时提供了对机器人台灯的全面控制系统，包括电机控制、录制/回放功能、语音交互和测试能力。
 
-[LeLamp](https://github.com/humancomputerlab/LeLamp) is an open source robot lamp based on [Apple's Elegnt](https://machinelearning.apple.com/research/elegnt-expressive-functional-movement), made by [[Human Computer Lab]](https://www.humancomputerlab.com/)
+[LeLamp](https://github.com/humancomputerlab/LeLamp) 是一个基于 [Apple 的 Elegnt](https://machinelearning.apple.com/research/elegnt-expressive-functional-movement) 开源的机器人台灯，由 [[Human Computer Lab]](https://www.humancomputerlab.com/) 制作。
 
-## Overview
+## 概览
 
-LeLamp Runtime is a Python-based control system that interfaces with the hardware components of LeLamp including:
+LeLamp 运行时是基于 Python 的控制系统，负责与 LeLamp 的硬件组件交互，包括：
 
-- Servo motors for articulated movement
-- Audio system (microphone and speaker)
-- RGB LED lighting
-- Camera system
-- Voice interaction capabilities
+- 用于关节运动的舵机电机
+- 音频系统（麦克风和扬声器）
+- RGB LED 灯光
+- 摄像头系统
+- 语音交互功能
 
-## Project Structure
+## 项目结构
 
 ```
 lelamp_runtime/
-├── main.py                 # Main runtime entry point
-├── pyproject.toml         # Project configuration and dependencies
-├── lelamp/                # Core package
-│   ├── setup_motors.py    # Motor configuration and setup
-│   ├── calibrate.py       # Motor calibration utilities
-│   ├── list_recordings.py # List all recorded motor movements
-│   ├── record.py          # Movement recording functionality
-│   ├── replay.py          # Movement replay functionality
-│   ├── follower/          # Follower mode functionality
-│   ├── leader/            # Leader mode functionality
-│   └── test/              # Hardware testing modules
-└── uv.lock               # Dependency lock file
+├── main.py                 # 主运行入口
+├── pyproject.toml         # 项目配置与依赖
+├── lelamp/                # 核心包
+│   ├── setup_motors.py    # 电机配置与设置
+│   ├── calibrate.py       # 电机校准工具
+│   ├── list_recordings.py # 列出所有录制的动作
+│   ├── record.py          # 动作录制功能
+│   ├── replay.py          # 动作回放功能
+│   ├── follower/          # Follower 模式相关实现
+│   ├── leader/            # Leader 模式相关实现
+│   └── test/              # 硬件测试模块
+└── uv.lock               # 依赖锁文件
 ```
 
-## Installation
+## 安装
 
-### Prerequisites
+### 前置要求
 
-- UV package manager
-- Hardware components properly assembled (see main LeLamp documentation)
+- 安装 UV 包管理器
+- 硬件组件已正确组装（详情见主 LeLamp 文档）
 
-### Setup
+### 设置
 
-1. Clone the runtime repository:
+1. 克隆运行时仓库：
 
 ```bash
 git clone https://github.com/humancomputerlab/lelamp_runtime.git
 cd lelamp_runtime
 ```
 
-2. Install UV (if not already installed):
+2. 安装 UV（如果尚未安装）：
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-3. Install dependencies:
+3. 安装依赖：
 
 ```bash
-# If on your personal computer
+# 如果在个人电脑上运行
 uv sync
 
-# If on Raspberry Pi
+# 如果在树莓派上运行
 uv sync --extra hardware
 ```
 
-**Note**: For motor setup and control, LeLamp Runtime can run on your computer and you only need to run `uv sync`. For other functionality that connects to the head Pi (LED control, audio, camera), you need to install LeLamp Runtime on that Pi and run `uv sync --extra hardware`.
+**注意**：对于电机设置和控制，LeLamp 运行时可以在你的电脑上运行，仅需执行 `uv sync` 即可。对于连接到 head Pi 的其他功能（例如 LED 控制、音频、摄像头），需要在对应的树莓派上安装运行并执行 `uv sync --extra hardware`。
 
-If you have LFS problems, run the following command:
+如果遇到 LFS（Git Large File Storage）相关问题，请运行：
 
 ```bash
 GIT_LFS_SKIP_SMUDGE=1 uv sync
 ```
 
-If your installation process is slow, use the following environment variable:
+如果安装过程较慢，可以使用下面的环境变量来加速：
 
 ```bash
 export UV_CONCURRENT_DOWNLOADS=1
 ```
 
-### Dependencies
+### 依赖
 
-The runtime includes several key dependencies:
+运行时包含几个关键依赖：
 
-- **feetech-servo-sdk**: For servo motor control
-- **lerobot**: Robotics framework integration
-- **livekit-agents**: Real-time voice interaction
-- **numpy**: Mathematical operations
-- **sounddevice**: Audio input/output
-- **adafruit-circuitpython-neopixel**: RGB LED control (hardware)
-- **rpi-ws281x**: Raspberry Pi LED control (hardware)
+- **feetech-servo-sdk**：用于舵机电机控制
+- **lerobot**：机器人框架集成
+- **livekit-agents**：实时语音交互
+- **numpy**：数值计算
+- **sounddevice**：音频输入/输出
+- **adafruit-circuitpython-neopixel**：RGB LED 控制（硬件）
+- **rpi-ws281x**：Raspberry Pi LED 控制（硬件）
 
-## Core Functionality
+## 核心功能
 
-Prior to following the instructions here, you should have an overview of how to control LeLamp through [this tutorial](https://github.com/humancomputerlab/LeLamp/blob/master/docs/5.%20LeLamp%20Control.md).
+在继续之前，建议先阅读本项目的控制教程：[LeLamp 控制指南](https://github.com/humancomputerlab/LeLamp/blob/master/docs/5.%20LeLamp%20Control.md)。
 
-### 1. Motor Setup and Calibration
+### 1. 电机设置与校准
 
-1. **Find the servo driver port**:
+1. **查找舵机驱动端口**：
 
-This command finds the port your motor driver is connected to.
+此命令会查找你的电机驱动器所连接的端口。
 
 ```bash
 uv run lerobot-find-port
 ```
 
-2. **Setup motors with unique IDs**:
+2. **用唯一 ID 设置电机**：
 
-This command set up each motor of LeLamp with an unique ID.
+此命令为 LeLamp 的每个电机设置唯一 ID。
 
 ```bash
 uv run -m lelamp.setup_motors --id your_lamp_name --port the_port_found_in_previous_step
 ```
 
-3. **Calibrate motors**:
+3. **校准电机**：
 
-This command calibrate your motors.
+此命令用于校准电机。
 
 ```bash
 sudo uv run -m lelamp.calibrate --id your_lamp_name --port the_port_found_in_previous_step
 ```
 
-The calibration process will:
+校准过程将会：
 
-- Calibrate both follower and leader modes
-- Ensure proper servo positioning and response
-- Set baseline positions for accurate movement
+- 同时校准 follower 和 leader 模式
+- 确保舵机定位和响应正确
+- 设置基线位置以获得准确的运动
 
-### 2. Unit Testing
+### 2. 单元测试
 
-The runtime includes comprehensive testing modules to verify all hardware components:
+运行时包含用于验证所有硬件组件的测试模块：
 
-#### RGB LEDs
+#### RGB 灯
 
 ```bash
-# Run with sudo for hardware access
+# 需要以 sudo 权限运行以访问硬件
 sudo uv run -m lelamp.test.test_rgb
 ```
 
-#### Audio System (Microphone and Speaker)
+#### 音频系统（麦克风与扬声器）
 
 ```bash
 uv run -m lelamp.test.test_audio
 ```
 
-#### Motors
+#### 电机
 
 ```bash
 uv run -m lelamp.test.test_motors --id your_lamp_name --port the_port_found_in_previous_step
 ```
 
-### 3. Record and Replay Episodes
+### 3. 录制与回放动作
 
-One of LeLamp's key features is the ability to record and replay movement sequences:
+LeLamp 的一项核心功能是能够录制并回放动作序列：
 
-#### Recording Movement
+#### 录制动作
 
-To record a movement sequence:
+要录制动作序列：
 
 ```bash
 uv run -m lelamp.record --id your_lamp_name --port the_port_found_in_previous_step --name movement_sequence_name
 ```
 
-This will:
+此操作将：
 
-- Put the lamp in recording mode
-- Allow you to manually manipulate the lamp
-- Save the movement data to a CSV file
+- 将灯置于录制模式
+- 允许你手动操作灯以录制动作
+- 将动作数据保存为 CSV 文件
 
-#### Replaying Movement
+#### 回放动作
 
-To replay a recorded movement:
+要回放已录制的动作：
 
 ```bash
 uv run -m lelamp.replay --id your_lamp_name --port the_port_found_in_previous_step --name movement_sequence_name
 ```
 
-The replay system will:
+回放系统将会：
 
-- Load the movement data from the CSV file
-- Execute the recorded movements with proper timing
-- Reproduce the original motion sequence
+- 从 CSV 文件加载动作数据
+- 按正确的时间执行录制的动作
+- 重现原始的运动序列
 
-#### Listing Recordings
+#### 列出录制文件
 
-To view all recordings for a specific lamp:
+要查看某个灯的所有录制文件：
 
 ```bash
 uv run -m lelamp.list_recordings --id your_lamp_name
 ```
 
-This will display:
+该命令将显示：
 
-- All available recordings for the specified lamp
-- File information including row count
-- Recording names that can be used for replay
+- 指定灯的所有可用录制文件
+- 每个文件的行数等信息
+- 可用于回放的录制名称
 
-#### File Format
+#### 文件格式
 
-Recorded movements are saved as CSV files with the naming convention:
+录制的动作以 CSV 文件保存，命名格式为：
 `{sequence_name}.csv`
 
-## 4. Start upon boot
+## 4. 开机自启
 
-If you want to start LeLamp's voice app upon booting. Create a systemd service file:
+如果希望在机器启动时运行 LeLamp 的语音应用，可以创建一个 systemd 服务文件：
 
 ```bash
 sudo nano /etc/systemd/system/lelamp.service
 ```
 
-Add this content:
+添加以下内容：
 
-```bash
-ini[Unit]
+```ini
+[Unit]
 Description=Lelamp Runtime Service
 After=network.target
 
@@ -229,7 +229,7 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Then enable and start the service:
+然后启用并启动服务：
 
 ```bash
 sudo systemctl daemon-reload
@@ -237,28 +237,28 @@ sudo systemctl enable lelamp.service
 sudo systemctl start lelamp.service
 ```
 
-For other service controls:
+其他服务控制命令：
 
 ```bash
-# Disable from starting on boot
+# 禁用开机启动
 sudo systemctl disable lelamp.service
 
-# Stop the currently running service
+# 停止当前运行的服务
 sudo systemctl stop lelamp.service
 
-# Check status (should show "disabled" and "inactive")
+# 检查状态（应显示 "disabled" 或 "inactive"）
 sudo systemctl status lelamp.service
 ```
 
-Note: Boot time might vary with each run and extended usage (>1 hour) can burn the motors.
+注意：每次运行的启动时间可能不同，长时间运行（>1 小时）可能会造成电机过热或损耗。
 
-## Sample Apps
+## 示例应用
 
-Sample apps to test LeLamp's capabilities.
+下面是用来测试 LeLamp 能力的示例应用。
 
-### LiveKit Voice Agent
+### LiveKit 语音代理
 
-To run a conversational agent on LeLamp, create a .env file with the following content in the root of this directory in your Raspberry Pi.
+要在 LeLamp 上运行对话代理，请在目标树莓派的仓库根目录下创建一个 `.env` 文件，包含以下内容：
 
 ```bash
 OPENAI_API_KEY=
@@ -267,43 +267,42 @@ LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
 ```
 
-On how to get LiveKit secrets, please refer to [LiveKit's guide](https://docs.livekit.io/agents/start/voice-ai/). Install LiveKit CLI, then you can run the following command:
+有关如何获取 LiveKit 密钥，请参考 [LiveKit 指南](https://docs.livekit.io/agents/start/voice-ai/)。安装 LiveKit CLI 后可以运行：
 
 ```bash
 lk app env -w
 cat .env.local
 ```
 
-This will automatically create an `.env.local` file for you, which contains all the secrets on LiveKit side.
+这会自动在本地创建一个 `.env.local` 文件，其中包含来自 LiveKit 的所有密钥。
 
-On how to get OpenAI secrets, you can follow this [FAQ](https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key).
+关于 OpenAI 密钥的获取，请参考 OpenAI 的常见问题或控制台获取方法。
 
-Then you can run the agent app by:
+然后可以运行代理应用：
 
 ```bash
-# Only need to run this once
+# 只需运行一次以下载所需文件
 sudo uv run main.py download-files
 
-# Pick one of the below
-# For Discrete Animation Mode
+# 下面任选其一
+# 离散动画模式
 sudo uv run main.py console
 
-# For Smooth Animation Mode
+# 平滑动画模式
 sudo uv run smooth_animation.py console
 ```
 
-In case your lamp is not `lelamp`, change the id of the lamp inside main.py:
+如果你的灯的 id 不是 `lelamp`，请在 `main.py` 中更改：
 
 ```py
 async def entrypoint(ctx: agents.JobContext):
-    agent = LeLamp(lamp_id="lelamp") # <- Chnage the name here
+    agent = LeLamp(lamp_id="lelamp") # <- 在这里更改名称
 ```
 
-## Contributing
+## 贡献
 
-This is an open-source project by Human Computer Lab. Contributions are welcome through the GitHub repository.
+本项目由 Human Computer Lab 以开源方式维护，欢迎通过 GitHub 仓库提交贡献。
 
+## 许可证
 
-## License
-
-Check the main [LeLamp repository](https://github.com/humancomputerlab/LeLamp) for licensing information.
+有关许可证信息，请查看主仓库 [LeLamp](https://github.com/humancomputerlab/LeLamp)。

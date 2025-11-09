@@ -16,6 +16,7 @@ dependencies = [
     "pyaudio>=0.2.14",
     "python-dotenv",
     "sounddevice>=0.5.2",
+    "torch>=2.6.0",
 ]
 
 [tool.uv.sources]
