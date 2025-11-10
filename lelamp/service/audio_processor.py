@@ -1,4 +1,11 @@
-
+from livekit import rtc
+from lelamp.service.asr import FasterWhisperASR
+from lelamp.service.qwenllm import QwenLLM
+from lelamp.service.tts import EdgeTTS
+from main import LeLamp
+import asyncio
+import re
+import random
 
 WAKE_PHRASES = {"hey lelamp", "hi lelamp", "okay lelamp", "lelamp"}
 class AudioProcessor:
@@ -77,7 +84,7 @@ class AudioProcessor:
                     # 听不清 → 主动请求重复
                     confused = "Sorry, say that once more?"
                     raw_resp = f"{confused} @@play_recording('scanning')@@ @@set_rgb_solid(100, 100, 255)@@"
-                    speech = extract_and_execute_actions(self.agent, raw_resp)
+                    speech = self.extract_and_execute_actions(self.agent, raw_resp)
                     await self.tts.synthesize_and_play(speech)
                     continue
 
@@ -86,7 +93,7 @@ class AudioProcessor:
 
                 # LLM
                 raw_response = await self.llm.chat(conversation_history)
-                speech_text = extract_and_execute_actions(self.agent, raw_response)
+                speech_text = LeLamp.extract_and_execute_actions(self.agent, raw_response)
                 print(f"🤖 LeLamp: {speech_text}")
 
                 conversation_history.append({"role": "assistant", "content": raw_response})
@@ -95,3 +102,49 @@ class AudioProcessor:
             except Exception as e:
                 print(f"⚠️ Audio loop error: {e}")
                 continue
+
+    def extract_and_execute_actions(agent: LeLamp, full_response: str) -> str:
+        pattern = r"@@(\w+)\(([^)]+)\)@@"
+        calls = re.findall(pattern, full_response)
+        speech = re.sub(pattern, "", full_response).strip()
+
+        has_play = False
+        has_light = False
+        for func_name, args_str in calls:
+            try:
+                if args_str.startswith('"') or args_str.startswith("'"):
+                    arg_val = args_str.strip('"\'')
+                    args = (arg_val,)
+                else:
+                    args = tuple(int(x.strip()) for x in args_str.split(",") if x.strip())
+
+                if func_name == "play_recording":
+                    recording = args[0]
+                    valid = {"curious", "excited", "happy_wiggle", "headshake", "nod",
+                             "sad", "scanning", "shock", "shy", "wake_up"}
+                    if recording in valid:
+                        asyncio.create_task(agent.motors_service.dispatch("play", recording))
+                        has_play = True
+
+                elif func_name == "set_rgb_solid":
+                    if len(args) == 3:
+                        r, g, b = args
+                        if all(0 <= x <= 255 for x in (r, g, b)):
+                            asyncio.create_task(agent.rgb_service.dispatch("solid", (r, g, b)))
+                            has_light = True
+            except Exception as e:
+                print(f"❌ Action error: {e}")
+
+        # Auto-fill missing actions
+        if not has_play:
+            default = random.choice(["nod", "curious", "happy_wiggle"])
+            asyncio.create_task(agent.motors_service.dispatch("play", default))
+            print(f"🤖 Auto motion: {default}")
+
+        if not has_light:
+            colors = [(255, 100, 100), (100, 255, 150), (100, 150, 255), (255, 200, 100)]
+            r, g, b = random.choice(colors)
+            asyncio.create_task(agent.rgb_service.dispatch("solid", (r, g, b)))
+            print(f"💡 Auto light: ({r}, {g}, {b})")
+
+        return speech

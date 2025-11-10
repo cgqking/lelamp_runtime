@@ -2,7 +2,6 @@ from livekit.agents.llm import LLM
 import os
 import httpx
 
-# === 自定义 Qwen LLM 类 ===
 class QwenLLM(LLM):
     def __init__(self, model: str = "qwen-turbo"):
         self.model = model
