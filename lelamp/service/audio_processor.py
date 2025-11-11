@@ -1,60 +1,106 @@
-from livekit import rtc
-from lelamp.service.asr import FasterWhisperASR
-from lelamp.service.qwenllm import QwenLLM
-from lelamp.service.tts import EdgeTTS
-from main import LeLamp
+# lelamp/service/audio_processor.py
+
 import asyncio
 import re
 import random
+from livekit import rtc
+
+from lelamp.service.asr import FasterWhisperASR
 
 WAKE_PHRASES = {"hey lelamp", "hi lelamp", "okay lelamp", "lelamp"}
+VALID_RECORDINGS = {
+    "curious", "excited", "happy_wiggle", "headshake", "nod",
+    "sad", "scanning", "shock", "shy", "wake_up"
+}
+DEFAULT_MOTIONS = ["nod", "curious", "happy_wiggle"]
+ACTION_PATTERN = re.compile(r"@@(\w+)\(([^)]+)\)@@")
+
+
 class AudioProcessor:
-    def __init__(self, agent: LeLamp, llm: QwenLLM, tts: EdgeTTS):
+    def __init__(self, agent, llm, tts):
         self.agent = agent
         self.llm = llm
         self.tts = tts
-        self.asr = FasterWhisperASR(model_size="base")  # 可换 small/base.int8
+        self.asr = FasterWhisperASR(model_size="base")
+        self._active_streams = {}  # track_sid -> task
 
     async def run(self, room: rtc.Room):
-        # Find first user audio track
-        subscriber = None
-        for participant in room.participants.values():
-            if participant.identity == "host":  # 或根据你的房间设置调整
-                for track_pub in participant.tracks.values():
-                    if track_pub.kind == rtc.TrackKind.KIND_AUDIO:
-                        subscriber = track_pub
-                        break
-            if subscriber:
-                break
+        print("🎙️ AudioProcessor started — listening to any speaker")
 
-        if not subscriber:
-            print("No host audio found!")
-            return
-
-        track = await room.subscribe(subscriber.track_sid)
-        if not isinstance(track, rtc.AudioTrack):
-            return
-
-        frame_queue = asyncio.Queue()
         conversation_history = [{"role": "system", "content": self.agent.instructions}]
 
-        async def audio_frame_loop():
-            async for frame in rtc.AudioStream(track):
-                await frame_queue.put(frame)
-            await frame_queue.put(None)
+        # 监听新发布的音频轨道
+        @room.on("track_published")
+        def on_track_published(pub: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant):
+            if pub.kind == rtc.TrackKind.KIND_AUDIO:
+                print(f"🎧 New audio track from {participant.identity}")
+                # 异步启动处理（避免阻塞事件回调）
+                asyncio.create_task(self._handle_audio_track(room, pub, participant, conversation_history))
 
-        asyncio.create_task(audio_frame_loop())
+        # 处理已经存在的音频轨道（房间连接时可能已有用户）
+        for participant in room.remote_participants.values():
+            for pub in participant.tracks.values():
+                if pub.kind == rtc.TrackKind.KIND_AUDIO and pub.track:
+                    print(f"🎧 Existing audio track from {participant.identity}")
+                    asyncio.create_task(self._handle_audio_track(room, pub, participant, conversation_history))
 
-        while True:
-            frames = []
-            try:
-                # 等待第一帧
-                first = await frame_queue.get()
-                if first is None:
+        # 保持运行
+        try:
+            await asyncio.Future()  # 永不退出
+        except asyncio.CancelledError:
+            print("🛑 AudioProcessor cancelled.")
+        finally:
+            # 取消所有流任务
+            for task in self._active_streams.values():
+                task.cancel()
+
+    async def _handle_audio_track(
+        self,
+        room: rtc.Room,
+        pub: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
+        conversation_history: list,
+    ):
+        track_sid = pub.sid
+        if track_sid in self._active_streams:
+            return  # 已在处理
+
+        try:
+            track = await room.subscribe(pub.track_sid)
+            if not isinstance(track, rtc.AudioTrack):
+                return
+        except Exception as e:
+            print(f"❌ Failed to subscribe to audio track {track_sid}: {e}")
+            return
+
+        task = asyncio.create_task(
+            self._process_audio_stream(track, participant.identity, conversation_history)
+        )
+        self._active_streams[track_sid] = task
+        try:
+            await task
+        except Exception as e:
+            print(f"⚠️ Audio stream error for {participant.identity}: {e}")
+        finally:
+            self._active_streams.pop(track_sid, None)
+
+    async def _process_audio_stream(
+        self,
+        track: rtc.AudioTrack,
+        identity: str,
+        conversation_history: list,
+    ):
+        frame_queue = asyncio.Queue()
+        stream_reader = asyncio.create_task(self._audio_stream_reader(track, frame_queue))
+
+        try:
+            while True:
+                first_frame = await frame_queue.get()
+                if first_frame is None:
                     break
-                frames.append(first)
+                frames = [first_frame]
 
-                # 继续收 1.5 秒或直到静音
+                # 收集后续帧（模拟 VAD）
                 while True:
                     try:
                         frame = await asyncio.wait_for(frame_queue.get(), timeout=1.5)
@@ -67,84 +113,98 @@ class AudioProcessor:
                 if not frames:
                     continue
 
-                # ASR（简化：传整个 buffer）
-                audio_buffer = bytearray()
-                for f in frames:
-                    audio_buffer.extend(f.data)
-
-                # 模拟转文本（实际应传给 FasterWhisper）
-                # 这里我们直接用一个临时队列模拟 stream_recognize
+                # ASR
                 temp_q = asyncio.Queue()
                 for f in frames:
                     await temp_q.put(f)
                 await temp_q.put(None)
+
                 user_text = await self.asr.stream_recognize(temp_q)
+                user_text = user_text.strip() if user_text else ""
 
-                if not user_text or len(user_text.strip()) < 2:
-                    # 听不清 → 主动请求重复
-                    confused = "Sorry, say that once more?"
-                    raw_resp = f"{confused} @@play_recording('scanning')@@ @@set_rgb_solid(100, 100, 255)@@"
-                    speech = self.extract_and_execute_actions(self.agent, raw_resp)
-                    await self.tts.synthesize_and_play(speech)
-                    continue
+                if not user_text or len(user_text) < 2:
+                    continue  # 忽略无效语音
 
-                print(f"👤 User: {user_text}")
+                print(f"👤 [{identity}] said: '{user_text}'")
+
+                # # 唤醒词检查（必须包含）
+                # if not any(phrase in user_text.lower() for phrase in WAKE_PHRASES):
+                #     print("💤 Ignoring: no wake word detected.")
+                #     continue
+
+                # LLM + 动作执行
                 conversation_history.append({"role": "user", "content": user_text})
+                try:
+                    raw_response = await self.llm.chat(conversation_history)
+                except Exception as e:
+                    print(f"⚠️ LLM error: {e}")
+                    raw_response = "Oops! Try again? @@play_recording('shock')@@"
 
-                # LLM
-                raw_response = await self.llm.chat(conversation_history)
-                speech_text = LeLamp.extract_and_execute_actions(self.agent, raw_response)
-                print(f"🤖 LeLamp: {speech_text}")
-
+                speech_text = self._execute_actions(raw_response)
                 conversation_history.append({"role": "assistant", "content": raw_response})
+
+                print(f"🤖 LeLamp replies: '{speech_text}'")
                 await self.tts.synthesize_and_play(speech_text)
 
-            except Exception as e:
-                print(f"⚠️ Audio loop error: {e}")
-                continue
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"💥 Error in audio processing for {identity}: {e}")
+        finally:
+            stream_reader.cancel()
 
-    def extract_and_execute_actions(agent: LeLamp, full_response: str) -> str:
-        pattern = r"@@(\w+)\(([^)]+)\)@@"
-        calls = re.findall(pattern, full_response)
-        speech = re.sub(pattern, "", full_response).strip()
+    async def _audio_stream_reader(self, track: rtc.AudioTrack, queue: asyncio.Queue):
+        try:
+            async for event in rtc.AudioStream(track):
+                await queue.put(event.frame)
+        except Exception as e:
+            print(f"⚠️ Audio stream reader error: {e}")
+        finally:
+            await queue.put(None)
 
+    def _execute_actions(self, full_response: str) -> str:
+        calls = ACTION_PATTERN.findall(full_response)
+        speech = ACTION_PATTERN.sub("", full_response).strip()
         has_play = False
-        has_light = False
+
         for func_name, args_str in calls:
             try:
-                if args_str.startswith('"') or args_str.startswith("'"):
+                if args_str.startswith(('"', "'")):
                     arg_val = args_str.strip('"\'')
                     args = (arg_val,)
                 else:
                     args = tuple(int(x.strip()) for x in args_str.split(",") if x.strip())
 
                 if func_name == "play_recording":
-                    recording = args[0]
-                    valid = {"curious", "excited", "happy_wiggle", "headshake", "nod",
-                             "sad", "scanning", "shock", "shy", "wake_up"}
-                    if recording in valid:
-                        asyncio.create_task(agent.motors_service.dispatch("play", recording))
+                    rec_name = args[0]
+                    if rec_name in VALID_RECORDINGS:
+                        asyncio.create_task(
+                            self.agent.motors_service.dispatch("play", rec_name)
+                        )
                         has_play = True
+                        print(f"🎬 Playing recording: {rec_name}")
+                    else:
+                        print(f"⚠️ Invalid recording: {rec_name}")
 
-                elif func_name == "set_rgb_solid":
-                    if len(args) == 3:
-                        r, g, b = args
-                        if all(0 <= x <= 255 for x in (r, g, b)):
-                            asyncio.create_task(agent.rgb_service.dispatch("solid", (r, g, b)))
-                            has_light = True
+                elif func_name == "set_rgb_solid" and len(args) == 3:
+                    r, g, b = args
+                    if all(0 <= x <= 255 for x in (r, g, b)):
+                        if hasattr(self.agent, 'rgb_service'):
+                            asyncio.create_task(
+                                self.agent.rgb_service.dispatch("solid", (r, g, b))
+                            )
+                            print(f"💡 Setting RGB: ({r}, {g}, {b})")
+                        else:
+                            print("💡 Ignoring light command: RGB service not active.")
+                    else:
+                        print(f"⚠️ Invalid RGB values: {args}")
+
             except Exception as e:
-                print(f"❌ Action error: {e}")
+                print(f"❌ Error executing {func_name}({args_str}): {e}")
 
-        # Auto-fill missing actions
         if not has_play:
-            default = random.choice(["nod", "curious", "happy_wiggle"])
-            asyncio.create_task(agent.motors_service.dispatch("play", default))
-            print(f"🤖 Auto motion: {default}")
+            motion = random.choice(DEFAULT_MOTIONS)
+            asyncio.create_task(self.agent.motors_service.dispatch("play", motion))
+            print(f"🤖 Auto-playing motion: {motion}")
 
-        if not has_light:
-            colors = [(255, 100, 100), (100, 255, 150), (100, 150, 255), (255, 200, 100)]
-            r, g, b = random.choice(colors)
-            asyncio.create_task(agent.rgb_service.dispatch("solid", (r, g, b)))
-            print(f"💡 Auto light: ({r}, {g}, {b})")
-
-        return speech
+        return speech if speech else "..."

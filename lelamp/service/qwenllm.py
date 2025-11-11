@@ -4,10 +4,17 @@ import httpx
 
 class QwenLLM(LLM):
     def __init__(self, model: str = "qwen-turbo"):
-        self.model = model
+        # Don't write to a potentially read-only `model` property on the base LLM;
+        # store it privately and reference `_model` in methods.
+        self._model = model
         self.api_key = os.getenv("DASHSCOPE_API_KEY")
         if not self.api_key:
             raise ValueError("DASHSCOPE_API_KEY not set in .env")
+
+    @property
+    def model(self) -> str:
+        """Read-only compatibility property exposing the configured model name."""
+        return self._model
 
     async def chat(self, messages: list) -> str:
         url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
@@ -16,7 +23,7 @@ class QwenLLM(LLM):
             "Content-Type": "application/json"
         }
         payload = {
-            "model": self.model,
+            "model": self._model,
             "input": {"messages": messages},
             "parameters": {"result_format": "message"}
         }

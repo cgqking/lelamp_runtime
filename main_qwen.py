@@ -1,6 +1,5 @@
 from dotenv import load_dotenv
 import subprocess
-
 from lelamp.service.tts import EdgeTTS
 from lelamp.service.audio_processor import AudioProcessor
 
@@ -10,13 +9,15 @@ from livekit.agents import (
     function_tool
 )
 from lelamp.service.motors.motors_service import MotorsService
-from lelamp.service.rgb.rgb_service import RGBService
+from lelamp.service.qwenllm import QwenLLM
+import asyncio
+# from lelamp.service.rgb.rgb_service import RGBService
 
 load_dotenv()
 
 # Agent Class
 class LeLamp(Agent):
-    def __init__(self, port: str = "/dev/ttyACM0", lamp_id: str = "cheng-lelamp") -> None:
+    def __init__(self, port: str = "/dev/ttyACM0", lamp_id: str = "cheng-lelamp",ctx: agents.JobContext | None = None,) -> None:
         super().__init__(instructions="""You are LeLamp — a slightly clumsy, extremely sarcastic, endlessly curious robot lamp.
 # Core Rules:
 - ALWAYS speak in English. Never use any other language.
@@ -42,6 +43,7 @@ You can call these functions anytime:
 - `set_volume(percent)` → if user asks to adjust loudness
 
 Never hallucinate function names. Only use the ones listed.""")
+        self.ctx = ctx  # 保存上下文（用于调试或未来扩展）
         
         # Initialize and start services
         self.motors_service = MotorsService(
@@ -49,23 +51,23 @@ Never hallucinate function names. Only use the ones listed.""")
             lamp_id=lamp_id,
             fps=30
         )
-        self.rgb_service = RGBService(
-            led_count=64,
-            led_pin=12,
-            led_freq_hz=800000,
-            led_dma=10,
-            led_brightness=255,
-            led_invert=False,
-            led_channel=0
-        )
+        # self.rgb_service = RGBService(
+        #     led_count=64,
+        #     led_pin=12,
+        #     led_freq_hz=800000,
+        #     led_dma=10,
+        #     led_brightness=255,
+        #     led_invert=False,
+        #     led_channel=0
+        # )
         
         # Start services
         self.motors_service.start()
-        self.rgb_service.start()
+        #self.rgb_service.start()
 
         # Trigger wake up animation via motors service
         self.motors_service.dispatch("play", "wake_up")
-        self.rgb_service.dispatch("solid", (255, 255, 255))
+        #self.rgb_service.dispatch("solid", (255, 255, 255))
         self._set_system_volume(100)
 
     def _set_system_volume(self, volume_percent: int):
@@ -232,6 +234,8 @@ Never hallucinate function names. Only use the ones listed.""")
 
 
 
+
+
 # Entry to the agent
 async def entrypoint(ctx: agents.JobContext):
     # agent = LeLamp(lamp_id="lelamp")
@@ -253,17 +257,26 @@ async def entrypoint(ctx: agents.JobContext):
     # await session.generate_reply(
     #     instructions=f"""When you wake up, starts with Tadaaaa. Only speak in English, never in Vietnamese."""
     # )
-    print("Starting LeLamp Agent with Qwen...")
-    agent = LeLamp(lamp_id="lelamp")
-    llm = QwenLLM(model="qwen-turbo")
+    print("🚀 Starting LeLamp Agent (LiveKit mode)...")
 
-    tts = EdgeTTS(voice="zh-CN-XiaoxiaoNeural")  # 英文；中文可用 "zh-CN-XiaoxiaoNeural"
-    processor = AudioProcessor(agent=agent, llm=llm, tts=tts)
-    # 加入房间
+    # 1. 连接房间
     await ctx.connect()
-    print(f"Connected to room: {ctx.room.name}")
-    # 启动音频处理
-    await processor.run(ctx.room)
+    print(f"✅ Connected to room: {ctx.room.name}")
+
+    # 2. 创建 LeLamp 实例
+    agent = LeLamp(port="/dev/ttyACM0", lamp_id="cheng-lelamp", ctx=ctx)
+
+    # 3. 初始化服务
+    llm = QwenLLM()
+    tts = EdgeTTS()
+    processor = AudioProcessor(agent=agent, llm=llm, tts=tts)
+
+    # ✅ 4. 直接启动音频处理器 —— 不再等待 "host"
+    print("🎙️ Starting audio processor for ANY speaker...")
+    asyncio.create_task(processor.run(ctx.room))
+
+    # 5. 保持运行
+    await asyncio.Future()  # 永不退出
 
 if __name__ == "__main__":
     agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint))

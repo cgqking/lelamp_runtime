@@ -38,3 +38,5 @@ class FasterWhisperASR:
         text = "".join(seg.text for seg in segments).strip()
         print(f"ASR Result: '{text}'")
         return text
+
+
